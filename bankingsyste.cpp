@@ -1,187 +1,164 @@
-﻿// Smart Community Banking System (SCBS)
-// Features: Account Creation, Login, Balance Management, P2P Transfers, Savings Goals, Gamified Finance, etc.
-// This version uses only C++ standard concepts (no DB or external libs)
-
 #include <iostream>
-#include <string>
+#include <fstream>
 #include <vector>
-#include <unordered_map>
-using namespace std;
+#include <map>
+#include <memory>
+#include <iomanip>
+#include <string>
+#include <ctime>
+#include <stdexcept>
+#include <algorithm>
+#include <thread>
+#include <mutex>
 
-// Account Type Enum
-enum AccountType { SAVINGS, CURRENT, BUSINESS };
+class Transaction {
+public:
+    std::string date;
+    std::string time;
+    std::string type;
+    double amount;
+    double resultingBalance;
 
-// User Account Structure
-struct Account {
-    string username;
-    string password;
-    double balance;
-    AccountType type;
-    vector<string> transactionHistory;
-    double goalAmount;
-    bool goalSet = false;
+    Transaction(std::string t, double amt, double balance) 
+        : type(t), amount(amt), resultingBalance(balance) {
+        time_t now = time(0);
+        date = ctime(&now);
+        date.erase(date.length() - 1); // Remove newline
+        time = ctime(&now);
+        time.erase(time.length() - 1); // Remove newline
+    }
 };
 
-// Main Bank System Class
-class BankingSystem {
-private:
-    unordered_map<string, Account> users;
-    Account* loggedInUser = nullptr;
+class Account {
+protected:
+    double balance;
+    std::vector<Transaction> transactions;
 
 public:
-    // Create Account
-    void createAccount() {
-        Account acc;
-        cout << "Enter username: "; cin >> acc.username;
-        cout << "Enter password: "; cin >> acc.password;
-        acc.balance = 0.0;
+    Account() : balance(0.0) {}
 
-        int typeChoice;
-        cout << "Account Type (0 = SAVINGS, 1 = CURRENT, 2 = BUSINESS): ";
-        cin >> typeChoice;
-        acc.type = static_cast<AccountType>(typeChoice);
-
-        users[acc.username] = acc;
-        cout << "Account created successfully!\n";
+    virtual void deposit(double amount) {
+        balance += amount;
+        transactions.emplace_back("Deposit", amount, balance);
     }
 
-    // Login
-    bool login() {
-        string uname, pass;
-        cout << "Enter username: "; cin >> uname;
-        cout << "Enter password: "; cin >> pass;
+    virtual void withdraw(double amount) {
+        if (amount > balance) throw std::runtime_error("Insufficient funds");
+        balance -= amount;
+        transactions.emplace_back("Withdraw", amount, balance);
+    }
 
-        if (users.count(uname) && users[uname].password == pass) {
-            loggedInUser = &users[uname];
-            cout << "Login successful!\n";
-            return true;
+    double getBalance() const {
+        return balance;
+    }
+
+    const std::vector<Transaction>& getTransactions() const {
+        return transactions;
+    }
+};
+
+class SavingsAccount : public Account {
+private:
+    double interestRate;
+
+public:
+    SavingsAccount(double rate) : interestRate(rate) {}
+
+    void applyInterest() {
+        balance += balance * interestRate;
+    }
+};
+
+class User {
+private:
+    std::string name;
+    std::string username;
+    std::string password;
+    std::unique_ptr<Account> account;
+
+public:
+    User(std::string n, std::string u, std::string p) 
+        : name(n), username(u), password(p), account(std::make_unique<SavingsAccount>(0.05)) {}
+
+    void deposit(double amount) {
+        account->deposit(amount);
+    }
+
+    void withdraw(double amount) {
+        account->withdraw(amount);
+    }
+
+    double getBalance() const {
+        return account->getBalance();
+    }
+
+    const std::vector<Transaction>& getTransactions() const {
+        return account->getTransactions();
+    }
+
+    std::string getUsername() const {
+        return username;
+    }
+
+    bool validatePassword(const std::string& p) const {
+        return password == p;
+    }
+};
+
+class BankSystem {
+private:
+    std::map<std::string, std::shared_ptr<User>> users;
+    std::mutex mtx;
+
+public:
+    void addUser(const std::string& name, const std::string& username, const std::string& password) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (users.find(username) != users.end()) {
+            throw std::runtime_error("Username already exists");
         }
-        cout << "Invalid credentials.\n";
-        return false;
+        users[username] = std::make_shared<User>(name, username, password);
     }
 
-    // View Balance
-    void viewBalance() {
-        if (loggedInUser)
-            cout << "Current Balance: $" << loggedInUser->balance << "\n";
-    }
-
-    // Deposit
-    void deposit() {
-        double amt;
-        cout << "Enter amount to deposit: $";
-        cin >> amt;
-        loggedInUser->balance += amt;
-        loggedInUser->transactionHistory.push_back("Deposited $" + to_string(amt));
-        cout << "Deposit successful!\n";
-    }
-
-    // Withdraw
-    void withdraw() {
-        double amt;
-        cout << "Enter amount to withdraw: $";
-        cin >> amt;
-        if (amt <= loggedInUser->balance) {
-            loggedInUser->balance -= amt;
-            loggedInUser->transactionHistory.push_back("Withdrew $" + to_string(amt));
-            cout << "Withdrawal successful!\n";
+    std::shared_ptr<User> login(const std::string& username, const std::string& password) {
+        std::lock_guard<std::mutex> lock(mtx);
+        auto it = users.find(username);
+        if (it != users.end() && it->second->validatePassword(password)) {
+            return it->second;
         }
-        else {
-            cout << "Insufficient funds.\n";
+        throw std::runtime_error("Invalid username or password");
+    }
+
+    void saveData() {
+        std::ofstream file("bank_data.txt", std::ios::binary);
+        for (const auto& pair : users) {
+            // Serialize user data
+            // Implementation omitted for brevity
         }
     }
 
-    // Transfer
-    void transfer() {
-        string recipient;
-        double amt;
-        cout << "Enter recipient username: ";
-        cin >> recipient;
-        cout << "Enter amount to transfer: $";
-        cin >> amt;
-
-        if (users.count(recipient) && amt <= loggedInUser->balance) {
-            loggedInUser->balance -= amt;
-            users[recipient].balance += amt;
-            loggedInUser->transactionHistory.push_back("Transferred $" + to_string(amt) + " to " + recipient);
-            users[recipient].transactionHistory.push_back("Received $" + to_string(amt) + " from " + loggedInUser->username);
-            cout << "Transfer successful!\n";
-        }
-        else {
-            cout << "Transfer failed. Check balance or recipient.\n";
-        }
-    }
-
-    // Set Savings Goal
-    void setGoal() {
-        cout << "Enter your savings goal amount: $";
-        cin >> loggedInUser->goalAmount;
-        loggedInUser->goalSet = true;
-        cout << "Goal set to $" << loggedInUser->goalAmount << "\n";
-    }
-
-    // Track Goal
-    void trackGoal() {
-        if (loggedInUser->goalSet) {
-            double progress = (loggedInUser->balance / loggedInUser->goalAmount) * 100;
-            cout << "You are " << progress << "% toward your savings goal.\n";
-        }
-        else {
-            cout << "No goal set.\n";
-        }
-    }
-
-    // Gamified Finance Tip
-    void financeGameTip() {
-        cout << "🎯 Tip: Save at least 10% of each deposit to reach your goal faster!\n";
-    }
-
-    // View Transactions
-    void viewTransactions() {
-        cout << "Transaction History:\n";
-        for (auto& t : loggedInUser->transactionHistory)
-            cout << "- " << t << "\n";
-    }
-
-    // Main Menu
-    void menu() {
-        int choice;
-        do {
-            cout << "\n1. View Balance\n2. Deposit\n3. Withdraw\n4. Transfer\n5. Set Goal\n6. Track Goal\n7. View Tips\n8. Transactions\n0. Logout\nChoice: ";
-            cin >> choice;
-            switch (choice) {
-            case 1: viewBalance(); break;
-            case 2: deposit(); break;
-            case 3: withdraw(); break;
-            case 4: transfer(); break;
-            case 5: setGoal(); break;
-            case 6: trackGoal(); break;
-            case 7: financeGameTip(); break;
-            case 8: viewTransactions(); break;
-            case 0: loggedInUser = nullptr; cout << "Logged out.\n"; break;
-            default: cout << "Invalid option.\n";
-            }
-        } while (loggedInUser);
-    }
-
-    // Entry Point
-    void run() {
-        int ch;
-        do {
-            cout << "\n--- Smart Community Banking ---\n1. Create Account\n2. Login\n0. Exit\nChoice: ";
-            cin >> ch;
-            switch (ch) {
-            case 1: createAccount(); break;
-            case 2: if (login()) menu(); break;
-            case 0: cout << "Goodbye!\n"; break;
-            default: cout << "Invalid.\n";
-            }
-        } while (ch != 0);
+    void loadData() {
+        std::ifstream file("bank_data.txt", std::ios::binary);
+        // Deserialize user data
+        // Implementation omitted for brevity
     }
 };
 
 int main() {
-    BankingSystem bank;
-    bank.run();
+    BankSystem bank;
+    try {
+        bank.addUser("John Doe", "johndoe", "password123");
+        auto user = bank.login("johndoe", "password123");
+        user->deposit(1000);
+        user->withdraw(200);
+        std::cout << "Balance: " << user->getBalance() << std::endl;
+
+        for (const auto& transaction : user->getTransactions()) {
+            std::cout << transaction.date << " " << transaction.time << " " 
+                      << transaction.type << " " << transaction.amount 
+                      << " Balance: " << transaction.resultingBalance << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+    }
     return 0;
 }
