@@ -60,7 +60,7 @@ Skills You Will Learn
 
 Author
 
-Your Mengistu Tarko , mengistutarkoa@gmail.com 
+ Mengistu Tarko , mengistutarkoa@gmail.com 
 
 License
 
